@@ -7,14 +7,14 @@
 
 #define PORT (8082)
 
-char *HttpUrlStringSearch(char *buf, char search, int *out_methodlen)
+char *HttpUrlStringSearch(char *buf, int *out_methodlen)
 {
     // we read upto the first space
     char *ret = buf;
 
     for (*out_methodlen = 0;
          buf[*out_methodlen] &&
-         buf[*out_methodlen] != search &&
+         buf[*out_methodlen] != ' ' &&
          buf[*out_methodlen] != '=' /*url value seprator*/ &&
          buf[*out_methodlen] != '?' /*url param sepprator*/;
          *out_methodlen += 1)
@@ -88,21 +88,20 @@ void WriteDateTime(int fd)
     char time_buff[80];
     strftime(time_buff, sizeof(time_buff), "%c", local);
 
-    #define datetime_html HTTP_200_OK CONTENT_TEXT_HTML\
-        "\r\n<!DOCTYPE html>\r\n"\
-        "<html>\r\n"\
-        "<head></head>\r\n"\
-        "<body>\r\n"\
-        "This was rendered at %s\r\n"\
-        "</body>\r\n"\
-        "</html>\r\n\r\n"
+#define datetime_html HTTP_200_OK CONTENT_TEXT_HTML \
+    "\r\n<!DOCTYPE html>\r\n"                       \
+    "<html>\r\n"                                    \
+    "<head></head>\r\n"                             \
+    "<body>\r\n"                                    \
+    "This was rendered at %s\r\n"                   \
+    "</body>\r\n"                                   \
+    "</html>\r\n\r\n"
 
-    char outbuf [1024] = {0};
+    char outbuf[1024] = {0};
 
     sprintf(outbuf, datetime_html, time_buff);
 
     WriteBuffer(fd, outbuf, strlen(outbuf));
-
 }
 
 #define SLICE_FMT "%.*s"
@@ -115,8 +114,6 @@ typedef struct Slice
 #define SLICE(CLIT) \
     (Slice) { .buf = CLIT, .len = sizeof(CLIT) / sizeof(CLIT[0]) }
 
-#define SLICE_CMP(SLICE, STRINGLITTERAL)
-
 // non-zero to be not match  ... tbh idk how memcmps output works, also we just match the parts
 // of the shortest string, from the from
 int slice_cmp(Slice a, Slice b) { return memcmp(a.buf, b.buf, a.len < b.len ? a.len : b.len); }
@@ -125,7 +122,9 @@ void Route(
     int fd,
     Slice request,
     Slice method,
-    Slice route)
+    Slice route,
+    int argc,
+    Slice args[argc])
 {
 
     if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/"), route) == 0)
@@ -142,20 +141,40 @@ void Route(
     }
 
     close(fd);
+}
 
-    // if (strncmp("GET", method, methodlen) == 0 && strncmp("/", route, routelen) == 0)
-    // {
-    // }
-    // else
-    // {
-    //     // a 404 page
-    //     puts("todo, 404");
-    // }
+/* returns number of args found in buffer and saved to dst */
+int HttpUrlGetArgs(char *buffer, int buflen, Slice *dst, int dstlen)
+{
+    // with args
+    // "?something=yes HTTP/1.1"
+    // without args
+    // " HTTP/1.1"
+
+    int nowlen, dstidx = 0;
+    char *now;
+
+    do
+    // I WAS WORKING HERE
+    dont compile lol
+    {
+        now = HttpUrlStringSearch(buffer, &nowlen);
+
+        if (now[0] == ' ')
+        {
+            /* end of args */
+        }
+    } while (now[0] != ' ');
+
+    puts(buffer);
+    return 0;
 }
 
 void handle_request(int fd)
 {
     char buffer[1024] = {0};
+    Slice args[255] = {0};
+
     // i think the first word is always the method, and then the route upto the next space?
     int r = read(fd, buffer, sizeof(buffer));
     if (0 > r)
@@ -166,14 +185,17 @@ void handle_request(int fd)
 
     buffer[r] = '\0';
 
-    puts(buffer);
+    // puts(buffer);
 
     int methodlen;
     int routelen;
 
     /* thease pointers are slices of buff, and there ends are set by methodlen and route len */
-    char *method = HttpUrlStringSearch(buffer, ' ', &methodlen);
-    char *route = HttpUrlStringSearch(buffer + methodlen + 1, ' ', &routelen);
+    char *method = HttpUrlStringSearch(buffer, &methodlen);
+    char *route = HttpUrlStringSearch(buffer + methodlen + 1, &routelen);
+    int used = methodlen + 1 + routelen;
+
+    int argc = HttpUrlGetArgs(buffer + used, r - used, args, sizeof(args) / sizeof(args[0]));
     // char *payload = ;
 
     if (!method || !route)
@@ -187,7 +209,8 @@ void handle_request(int fd)
     Route(fd,
           (Slice){.buf = buffer, .len = sizeof(buffer)},
           (Slice){.buf = method, .len = methodlen},
-          (Slice){.buf = route, .len = routelen});
+          (Slice){.buf = route, .len = routelen},
+          argc, args);
 }
 
 int main(int argc, char *argv[])
