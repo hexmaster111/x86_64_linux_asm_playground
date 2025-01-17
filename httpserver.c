@@ -1,3 +1,4 @@
+#include <sys/mman.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,7 @@ typedef struct SlicePair
 // non-zero to be not match  ... tbh idk how memcmps output works, also we just match the parts
 // of the shortest string, from the from
 int slice_cmp(Slice a, Slice b) { return memcmp(a.buf, b.buf, a.len < b.len ? a.len : b.len); }
+int WriteBuffer(int fd, char *buffer, int bufferlen);
 
 char *HttpUrlStringSearch(char *buf, int *out_methodlen)
 {
@@ -46,6 +48,26 @@ char *HttpUrlStringSearch(char *buf, int *out_methodlen)
         ;
 
     return ret;
+}
+
+#define HTML_HEADER HTTP_200_OK CONTENT_TEXT_HTML "\r\n"
+const int html_header_len = sizeof(HTML_HEADER)/sizeof(HTML_HEADER[0]);
+
+int AppendHTMLHeaderAndWriteBuffer(int fd, char*buffer, int bufferlen){
+
+    char *m = calloc(bufferlen + html_header_len, sizeof(char));
+
+    if(!m) 
+        return -1;
+
+    memcpy(m, HTML_HEADER, html_header_len);
+    memcpy(m + html_header_len, buffer, bufferlen);
+
+    int r = WriteBuffer(fd, m, bufferlen + html_header_len);
+
+    free(m);
+
+    return r;
 }
 
 // 0 ok, 0>ret bad
@@ -95,6 +117,104 @@ int WriteHelloWorldHtml(int fd)
 
     return WriteBuffer(fd, hello_world_html, sizeof(hello_world_html) / sizeof(hello_world_html[0]));
 #undef hello_world_html
+}
+
+int WriteDateTimeSkyTime(int fd)
+{
+    time_t now;
+    time(&now);
+
+    // Convert to local time
+    struct tm *local = localtime(&now);
+
+    // Format and print the date and time
+    char time_buff[100];
+    strftime(time_buff, sizeof(time_buff), "This %B the %d Day %A at the %l%p", local);
+
+#define datetime_html HTTP_200_OK CONTENT_TEXT_HTML \
+    "\r\n<!DOCTYPE html>\r\n"                       \
+    "<html>\r\n"                                    \
+    "<head></head>\r\n"                             \
+    "<body>\r\n"                                    \
+    "%s\r\n"                                        \
+    "</body>\r\n"                                   \
+    "</html>\r\n\r\n"
+
+    char outbuf[1024] = {0};
+
+    sprintf(outbuf, datetime_html, time_buff);
+
+    return WriteBuffer(fd, outbuf, strlen(outbuf));
+#undef datetime_html
+}
+
+#include <fcntl.h>
+#include <sys/stat.h>
+typedef struct file_memmap
+{
+    int len, fd;
+    char *map;
+} file_memmap;
+void CloseFileMemMap(file_memmap *fc)
+{
+    munmap(fc, fc->len);
+    close(fc->fd);
+
+    fc->map = NULL;
+    fc->len = 0;
+    fc->fd = 0;
+}
+
+// -1 on error 0 on ok
+int OpenFileMemMap(file_memmap *fc, const char *fpath)
+{
+    int fd = open(fpath, O_RDONLY);
+
+    if (fd == -1)
+    {
+        perror("open");
+        return -1;
+    }
+
+    struct stat sb;
+
+    if (fstat(fd, &sb) == -1)
+    {
+        perror("fstat");
+        return -1;
+    }
+
+    void *map = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+
+    if (map == MAP_FAILED)
+    {
+        close(fd);
+        return -1;
+    }
+
+    fc->map = (char*)map;
+    fc->len = sb.st_size;
+    fc->fd = fd;
+
+    return 0;
+}
+
+
+int WriteFileDirectly(int fd, const char *fpath)
+{
+    file_memmap f;
+    if(0> OpenFileMemMap(&f, fpath)){
+        perror("mmap");
+        return -1;
+    }
+
+    // int ret = WriteBuffer(fd, f.map, f.len);
+    int ret = AppendHTMLHeaderAndWriteBuffer(fd, f.map, f.len);
+    
+    CloseFileMemMap(&f);
+    
+    return  ret;
+    
 }
 
 int WriteDateTime(int fd)
@@ -174,7 +294,10 @@ int WriteArgsTable(
 
     snprintf(outbuffer, sizeof(outbuffer), args_table_html, builderbuffer);
 
-#undef tr_start tr_end td_start td_end
+#undef tr_start
+#undef tr_end
+#undef td_start
+#undef td_end
 
     return WriteBuffer(fd, outbuffer, sizeof(outbuffer));
 
@@ -186,6 +309,7 @@ void Route(
     Slice request,
     Slice method,
     Slice route,
+    Slice body,
     int url_argc,
     SlicePair url_args[url_argc])
 {
@@ -200,13 +324,21 @@ void Route(
     {
         WriteHelloWorldHtml(fd);
     }
-    else if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/now"), route) == 0)
+    else if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/now"), route) == 0) // route to
     {
-        WriteDateTime(fd);
+        WriteDateTime(fd); // func
     }
     else if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/args"), route) == 0)
     {
         WriteArgsTable(fd, url_argc, url_args);
+    }
+    else if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/skytime"), route) == 0)
+    {
+        WriteDateTimeSkyTime(fd);
+    }
+    else if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/index.html"), route) == 0)
+    {
+        WriteFileDirectly(fd, "index.html");
     }
     else
     {
@@ -214,6 +346,24 @@ void Route(
     }
 
     close(fd);
+}
+/*
+    returns NULL or body
+*/
+char* HttpGetBody(char *buffer, int bufferlen, int *out_len ){
+    puts(buffer);
+
+    // i think we just wanna read to the first empty blank line, and then empty the buffer?
+    int clear_line = 1;
+    for (char *c = buffer; ;c++)
+    {
+        dfdjksalfd I was here
+    }
+    
+
+
+    *out_len = 0;
+    return NULL;
 }
 
 /* returns number of args found in buffer and saved to dst
@@ -292,7 +442,7 @@ void handle_request(int fd)
 
     buffer[r] = '\0';
 
-    // puts(buffer);
+    puts(buffer);
 
     int methodlen;
     int routelen;
@@ -303,6 +453,10 @@ void handle_request(int fd)
     int used = methodlen + 1 + routelen;
 
     int argc = HttpUrlGetArgs(buffer + used, r - used, args, sizeof(args) / sizeof(args[0]));
+
+
+    int bodylen;
+    char *body = HttpGetBody(buffer, r, &bodylen);
 
     if (0 > argc)
     {
@@ -322,6 +476,7 @@ void handle_request(int fd)
           (Slice){.buf = buffer, .len = sizeof(buffer)},
           (Slice){.buf = method, .len = methodlen},
           (Slice){.buf = route, .len = routelen},
+          (Slice){.buf = body, .len = bodylen},
           argc, args);
 }
 

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+
+<head>
+    <style>
+        .container {
+            height: 200px;
+            position: relative;
+            border: 3px solid purple;
+        }
+    </style>
+
+
+    <script type="text/javascript">
+        function WriteValueOnClick() {
+            var tb = document.getElementById("tb_value").value;
+            fetch("http://localhost:8082/write", {
+                method: "POST",
+                body: JSON.stringify({
+                    something: 123,
+                    register: 10,
+                    value: 123,
+                    name: "test"
+                }),
+                headers: {
+                    "Content-type": "application/json; charset=UTF-8"
+                },
+
+            }).then((response) => response.json())
+                .then((json) => console.log(json));
+
+        }
+    </script>
+</head>
+
+<body>
+    <header>
+        <p>Hello from this text file!</p>
+    </header>
+    <div>
+        <input type="text" value="" id="tb_value" class="expand" onclick="WriteValueOnClick()" />
+        <input type="button" value="Write Value" id="btn_writevalue" onclick="WriteValueOnClick()" />
+    </div>
+</body>
