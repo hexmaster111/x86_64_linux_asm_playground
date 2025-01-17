@@ -3,14 +3,13 @@ format ELF64 executable 3
 segment readable executable
 
 entry $
-    ; int3
-
     ; /usr/include/x86_64/bits/socket.h
     ; #define PF_INET		2
 
     ; /usr/include/x86_64/bits/socket_type.h
     ; SOCK_STREAM = 1,		
 
+setup_socket:
     ;socket(AF_INET, SOCK_STREAM, 0);
     mov rax, 41 ; SOCKET
     mov rdi, 2  ; PF_INET
@@ -43,7 +42,7 @@ entry $
     ; /usr/include/asm-generic/socket.h
     ; #define SO_REUSEPORT 15
 
-    ;setsockopt(sfd, SOL_SOCKET, SO_REUSEPORT, &(int){1}, sizeof(int))
+    ; int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen);
     mov rax, 54     ; setsockopt
     mov rdi, [sfd]  ; server fd
     mov rsi, 1      ; SOL_SOCKET
@@ -72,14 +71,15 @@ entry $
     ; listen ( sfd, 1 )
     mov rax, 50     ; listen
     mov rdi, [sfd]  ; server file descripter
-    mov rsi, 1      ; max connection queue
+    mov rsi, 5      ; max connection queue
     syscall
 
     cmp rax, 0         ; if 0 > listen()
     jl exit_failure        ; exit
 
-.accept_new_clients:
-    ; accept ( sfd, &caddr, &caddrlen )
+accept_new_client:
+
+    ; int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
     mov rax, 43         ; accept
     mov rdi, [sfd]      ; server file destor
     mov rsi, caddr      ; & client address
@@ -91,88 +91,89 @@ entry $
     jl exit_failure        ; exit
 
     mov [cfd], rax   ; cfd = rax ; save client file descriptor
-
-.echo_loop:
     
-    ; read(cfd, buffer, buffer_len)
-    mov rax, 0 ; read
-    mov rdi, [cfd] ; cfd
-    mov rsi, buffer ; & readbuffer
-    mov rdx, buffer_len ; sizeof(readbuffer)
+    ;todo, fill buffer with request from client
+    jmp route;
+
+exit_ok:
+    mov rax, 60
+    mov rdi, 0
     syscall
 
-    ; rax is bytes got, or 0>rax on error
-    cmp rax, 0         ; if 0 > read()
-    jl exit_failure        ; exit -- TODO, jl done
-
-    mov rdx, rax ; save bytes in into rdx  
-    
-    ; write (cfd, buffer, bytes_in)
-    mov rax, 1 ; write
-    mov rdi, [cfd]
-    mov rsi, buffer
-    ; mov rdx, rax -- saved above
+exit_failure: 
+    mov rax, 60
+    mov rdi, 1
     syscall
 
-    ; rax is bytes out, or 0>rax on error
-    cmp rax, 0         ; if 0 > write()
-    jl exit_failure        ; exit -- TODO, jl done
 
-    ; todo -- we may need to call write more then once... this
-    ; example dose not check the write call to write more bytes
 
-    ; if (buffer[0] == 'q') goto done else goto echo_loop
-    cmp BYTE [buffer], 'q'
-    je  .done
-    jmp .echo_loop 
+route:
+    ; finds the METHOD (GET/POST)
+    ; reads the ROUTE (/index.html)
+    ; provies the file or error page
+    
+    mov r10, [cfd]
+    mov r11, html_ok_text
+    mov r12, htmllen
 
-.done:
+    call WriteData
+
+; after routing, we close the connection and get ready for the next request
+.cleanup:
+    ; int3
+
     ; close (cfd)
     mov rax, 3 ; close
     mov rdi, [cfd]
     syscall
-    
+  
     cmp rax, 0         ; if 0 > close()
     jl exit_failure        ; exit
 
-    ; close (sfd)
-    mov rax, 3 ; close
-    mov rdi, [sfd]
-    syscall
+    jmp accept_new_client ; go and start accepting another client
     
+; R10 - FD
+; R11 - Ptr
+; R12 - Len
+WriteData:
+    ; write
+    mov rax, 1
+    mov rdi, r10
+    mov rsi, r11
+    mov rdx, r12
+    syscall
+
+    ; TODO
+    ; if len > rax && 0 > rax
+    ;   we need to subtract rax from len, and re-call write()
+
+    ; if 0 > rax close()
     cmp rax, 0         ; if 0 > close()
     jl exit_failure        ; exit
-    jmp exit_ok
+    ret
 
-exit_ok:
-    mov rdi, 0
-    mov rax, 60
-    syscall
+segment readable writeable
+; space for our global vars
+cfd:dq 0  ;client file discripter
+sfd:dq 0  ;server file discripter
 
+clientlen:dq 0 ;clent socketaddr len
+serverlen:dq 0 ;server socketaddr len
 
-exit_failure:
-    mov rdi, 1
-    mov rax, 60
-    syscall
-
-
-segment readable
-socketmsg:db "socket"
-one:dd 1
-one_len = $-one
-
-segment readable writable
-cfd:dd 0  ;client file discripter
-sfd:dd 0  ;server file discripter
-clientlen:dd 0 ;clent socketaddr len
-serverlen:dd 0 ;server socketaddr len
+buffer: rb 1024
+buffer_len = $-buffer
 
 ; struct sockaddr_in (16 bytes)
 saddr: db 16 dup (0)
 saddr_len = $-saddr
 
-; struct sockaddr_in (16 bytes)
-caddr: db 16 dup (0)
+caddr: dd 16 dup (0)
 
-buffer: db 1024 dup (0)
-buffer_len = $-buffer
+segment readable
+one:dd 1
+one_len = $-one
+
+; some hello world HTML
+html_ok_text : file "http_200_ok.txt"
+htmltext: file "index.html"
+htmllen = $-htmltext + $-html_ok_text 
