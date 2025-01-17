@@ -13,18 +13,16 @@
 #define CONTENT_TEXT_HTML "Content-Type: text/html\r\n"
 
 #define SLICE_FMT "%.*s"
-#define SLICE_PNT(SLICE) SLICE.len, SLICE.buf
+#define SLICE_PNT(SLICE) SLICE.buf ? SLICE.len : (int)sizeof("(null)"), SLICE.buf ? SLICE.buf : "(null)"
 typedef struct Slice
 {
     char *buf;
     int len;
 } Slice;
-
 typedef struct SlicePair
 {
     Slice name, value;
 } SlicePair;
-
 #define SLICE(CLIT) \
     (Slice) { .buf = CLIT, .len = sizeof(CLIT) / sizeof(CLIT[0]) }
 
@@ -51,13 +49,14 @@ char *HttpUrlStringSearch(char *buf, int *out_methodlen)
 }
 
 #define HTML_HEADER HTTP_200_OK CONTENT_TEXT_HTML "\r\n"
-const int html_header_len = sizeof(HTML_HEADER)/sizeof(HTML_HEADER[0]);
+const int html_header_len = sizeof(HTML_HEADER) / sizeof(HTML_HEADER[0]);
 
-int AppendHTMLHeaderAndWriteBuffer(int fd, char*buffer, int bufferlen){
+int AppendHTMLHeaderAndWriteBuffer(int fd, char *buffer, int bufferlen)
+{
 
     char *m = calloc(bufferlen + html_header_len, sizeof(char));
 
-    if(!m) 
+    if (!m)
         return -1;
 
     memcpy(m, HTML_HEADER, html_header_len);
@@ -192,29 +191,24 @@ int OpenFileMemMap(file_memmap *fc, const char *fpath)
         return -1;
     }
 
-    fc->map = (char*)map;
+    fc->map = (char *)map;
     fc->len = sb.st_size;
     fc->fd = fd;
 
     return 0;
 }
 
-
 int WriteFileDirectly(int fd, const char *fpath)
 {
     file_memmap f;
-    if(0> OpenFileMemMap(&f, fpath)){
+    if (0 > OpenFileMemMap(&f, fpath))
+    {
         perror("mmap");
         return -1;
     }
-
-    // int ret = WriteBuffer(fd, f.map, f.len);
     int ret = AppendHTMLHeaderAndWriteBuffer(fd, f.map, f.len);
-    
     CloseFileMemMap(&f);
-    
-    return  ret;
-    
+    return ret;
 }
 
 int WriteDateTime(int fd)
@@ -253,16 +247,16 @@ int WriteArgsTable(
 {
 
 // style copied from https://www.w3schools.com/html/tryit.asp?filename=tryhtml_table_intro
-#define args_table_html HTTP_200_OK CONTENT_TEXT_HTML                                                                                                                                                                               \
-    "\r\n<!DOCTYPE html>\r\n"                                                                                                                                                                                                       \
-    "<html>\r\n"                                                                                                                                                                                                                    \
-    "<head><style>table {font-family: arial, sans-serif;border-collapse: collapse;width: 100%;}td, th {border: 1px solid #dddddd;text-align: left;padding: 8px;}tr:nth-child(even) {background-color: #dddddd;}</style></head>\r\n" \
-    "<body>\r\n"                                                                                                                                                                                                                    \
-    "<table><tr><th>name</th><th>value</th></tr>%s</table>\r\n"                                                                                                                                                                     \
-    "</body>\r\n"                                                                                                                                                                                                                   \
+#define args_table_html HTTP_200_OK CONTENT_TEXT_HTML                                                                                                                                                                                \
+    "\r\n<!DOCTYPE html>\r\n"                                                                                                                                                                                                        \
+    "<html>\r\n"                                                                                                                                                                                                                     \
+    "<head><style>table {font-family: arial, sans-serif;border-collapse: collapse;width: 100%%;}td, th {border: 1px solid #dddddd;text-align: left;padding: 8px;}tr:nth-child(even) {background-color: #dddddd;}</style></head>\r\n" \
+    "<body>\r\n"                                                                                                                                                                                                                     \
+    "<table><tr><th>name</th><th>value</th></tr>%s</table>\r\n"                                                                                                                                                                      \
+    "</body>\r\n"                                                                                                                                                                                                                    \
     "</html>\r\n\r\n"
 
-    char outbuffer[1024] = {0};
+    char outbuffer[1400] = {0};
     char builderbuffer[1024] = {0};
 
 #define tr_start "<tr>"
@@ -314,11 +308,22 @@ void Route(
     SlicePair url_args[url_argc])
 {
 
-    // for (int i = 0; i < url_argc; i++)
+    // Uncomment to show URL args
+    // if (url_argc)
     // {
-    //     SlicePair arg = url_args[i];
-    //     printf(SLICE_FMT ":" SLICE_FMT "\n", SLICE_PNT(arg.name), SLICE_PNT(arg.value));
+    //     puts("URL Args:");
+    //     for (int i = 0; i < url_argc; i++)
+    //     {
+    //         SlicePair arg = url_args[i];
+    //         printf(SLICE_FMT ":" SLICE_FMT "\n", SLICE_PNT(arg.name), SLICE_PNT(arg.value));
+    //     }
     // }
+
+    // Uncomment to show body
+    printf("Body: " SLICE_FMT "\n", SLICE_PNT(body));
+
+    // Uncomment to show the route and method
+    printf("Method:" SLICE_FMT "\nRoute:" SLICE_FMT "\n", SLICE_PNT(method), SLICE_PNT(route));
 
     if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/"), route) == 0)
     {
@@ -350,20 +355,30 @@ void Route(
 /*
     returns NULL or body
 */
-char* HttpGetBody(char *buffer, int bufferlen, int *out_len ){
-    puts(buffer);
-
-    // i think we just wanna read to the first empty blank line, and then empty the buffer?
-    int clear_line = 1;
-    for (char *c = buffer; ;c++)
+char *HttpGetBody(char *buf, int buflen, int *out_len)
+{
+    int bsi = 0;
+    for (; bsi < buflen; bsi++)
     {
-        dfdjksalfd I was here
+        if (buflen > bsi + 4 &&
+            buf[bsi] == '\r' &&
+            buf[bsi + 1] == '\n' &&
+            buf[bsi + 2] == '\r' &&
+            buf[bsi + 3] == '\n')
+        {
+            bsi += 4;
+            goto found_body;
+        }
     }
-    
-
 
     *out_len = 0;
     return NULL;
+
+found_body:
+    *out_len = 0;
+    char *bodystart = buf + bsi;
+    *out_len = strlen(bodystart);
+    return bodystart;
 }
 
 /* returns number of args found in buffer and saved to dst
@@ -406,7 +421,7 @@ int HttpUrlGetArgs(char *buffer, int buflen, SlicePair *dst, int dstlen)
             }
             else if (kv == 1)
             {
-                /* this is a key */
+                /* this is a value */
                 int vallen;
                 char *valstart = HttpUrlStringSearch(now, &vallen);
                 dst[dstidx].value = (Slice){.buf = valstart, .len = vallen};
@@ -442,7 +457,7 @@ void handle_request(int fd)
 
     buffer[r] = '\0';
 
-    puts(buffer);
+    // puts(buffer);
 
     int methodlen;
     int routelen;
@@ -453,7 +468,6 @@ void handle_request(int fd)
     int used = methodlen + 1 + routelen;
 
     int argc = HttpUrlGetArgs(buffer + used, r - used, args, sizeof(args) / sizeof(args[0]));
-
 
     int bodylen;
     char *body = HttpGetBody(buffer, r, &bodylen);
@@ -470,8 +484,6 @@ void handle_request(int fd)
         return;
     }
 
-    printf("Method: %.*s\nRoute: %.*s\n", methodlen, method, routelen, route);
-
     Route(fd,
           (Slice){.buf = buffer, .len = sizeof(buffer)},
           (Slice){.buf = method, .len = methodlen},
@@ -482,7 +494,8 @@ void handle_request(int fd)
 
 int main(int argc, char *argv[])
 {
-    int sfd, cfd, addr_len = sizeof(struct sockaddr_in);
+    int sfd, cfd;
+    socklen_t addr_len = sizeof(struct sockaddr_in);
     struct sockaddr_in saddr, caddr;
 
     sfd = socket(AF_INET, SOCK_STREAM, 0);

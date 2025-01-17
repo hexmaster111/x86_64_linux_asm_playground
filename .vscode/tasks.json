@@ -7,6 +7,8 @@
             "args": [
                 "-fdiagnostics-color=always",
                 "-g",
+                "-Wall",
+                "-fsanitize=address,leak",
                 "${file}",
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}"

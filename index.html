@@ -16,10 +16,8 @@
             fetch("http://localhost:8082/write", {
                 method: "POST",
                 body: JSON.stringify({
-                    something: 123,
-                    register: 10,
-                    value: 123,
-                    name: "test"
+                    TheValue: tb,
+                    SentAt: new Date().toLocaleString( 'sv', { timeZoneName: 'short' } )
                 }),
                 headers: {
                     "Content-type": "application/json; charset=UTF-8"
@@ -34,10 +32,10 @@
 
 <body>
     <header>
-        <p>Hello from this text file!</p>
+        <p></p>
     </header>
     <div>
-        <input type="text" value="" id="tb_value" class="expand" onclick="WriteValueOnClick()" />
-        <input type="button" value="Write Value" id="btn_writevalue" onclick="WriteValueOnClick()" />
+        <input id="tb_value" type="text" value=""  />
+        <input id="btn_writevalue" type="button" value="Write Value"  onclick="WriteValueOnClick()" />
     </div>
 </body>
