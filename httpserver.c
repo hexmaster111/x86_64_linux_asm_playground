@@ -298,6 +298,19 @@ int WriteArgsTable(
 #undef args_table_html
 }
 
+#define ROUTE_START \
+    if (0)          \
+    {               \
+    }
+
+#define ROUTE(METHOD, ROUTE) else if (slice_cmp(SLICE(METHOD), method) == 0 && slice_cmp(SLICE(ROUTE), route) == 0)
+
+#define ROUTE_END     \
+    else              \
+    {                 \
+        Write404(fd); \
+    }
+
 void Route(
     int fd,
     Slice request,
@@ -325,30 +338,28 @@ void Route(
     // Uncomment to show the route and method
     printf("Method:" SLICE_FMT "\nRoute:" SLICE_FMT "\n", SLICE_PNT(method), SLICE_PNT(route));
 
-    if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/"), route) == 0)
+    ROUTE_START
+    ROUTE("GET", "/")
     {
         WriteHelloWorldHtml(fd);
     }
-    else if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/now"), route) == 0) // route to
+    ROUTE("GET", "/now")
     {
         WriteDateTime(fd); // func
     }
-    else if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/args"), route) == 0)
+    ROUTE("GET", "/args")
     {
         WriteArgsTable(fd, url_argc, url_args);
     }
-    else if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/skytime"), route) == 0)
+    ROUTE("GET", "/skytime")
     {
         WriteDateTimeSkyTime(fd);
     }
-    else if (slice_cmp(SLICE("GET"), method) == 0 && slice_cmp(SLICE("/index.html"), route) == 0)
+    ROUTE("GET", "/index.html")
     {
         WriteFileDirectly(fd, "index.html");
     }
-    else
-    {
-        Write404(fd);
-    }
+    ROUTE_END;
 
     close(fd);
 }
